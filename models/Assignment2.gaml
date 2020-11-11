@@ -16,9 +16,12 @@ global{
 	int number_of_auctioneers <- 1;
 	int number_of_merch <- 2;
 	list<string> categories <- ["Frame","Car","Watch","Wine"];
+	list<person> people <-nil;
 	
 	init {
-		create person number: number_of_people ;
+		create person number: number_of_people returns: peeps;
+		add peeps all: true to:people;
+		
 		create merch number: number_of_merch;
 		create auctioneer number: number_of_auctioneers;
 		
@@ -28,6 +31,7 @@ global{
 species person skills:[moving,fipa] {
 	rgb mycolor <- #green;
 	string possible_interest <- nil;
+	point current_auction <-nil;
 	
 	init{
 		possible_interest <- categories at rnd(0,length(categories)-1);
@@ -42,16 +46,23 @@ species person skills:[moving,fipa] {
 	}
 	
 	reflex reply_broadcast when:(time = 2) { //At time two means that this reflex is accessed just to answer the broadcast message
-		message request_from_auctioneer <- requests at 0;
+		message request_from_auctioneer <- cfps at 0;
 		list<string> interest <- request_from_auctioneer.contents;
+		write '(Time ' + time + '): ' + name + ' receives a cfp message from ' + agent(request_from_auctioneer.sender).name + ' with content ' + request_from_auctioneer.contents;
 		
 		if (interest contains possible_interest) {
-			do agree with: (message: request_from_auctioneer,contents:['I am interested!']);
+			write '\t' + name + ' sends a propose message to ' + agent(request_from_auctioneer.sender).name;
+			current_auction <- auctioneer(request_from_auctioneer.sender).location;
+			do propose with: (message: request_from_auctioneer,contents:['I am interested!']);
 		}else{
-			//do failure (message: request_from_auctioneer, contents:['I am not interested!'] ); //Gives error with this line 
+			write '\t' + name + ' sends a refuse message to ' + agent(request_from_auctioneer.sender).name;
+			do refuse with: (message: request_from_auctioneer, contents:['I am not interested!'] ); 
 		}
-
-		
+	}
+	
+	reflex go_to_auction when: current_auction != nil{
+		mycolor <- #yellow;
+		do goto target:current_auction - 2;
 		
 	}
 }
@@ -76,15 +87,12 @@ species auctioneer skills:[fipa] {
 	rgb mycolor <- #grey;
 	merch first;
 	list<merch> merchandising <- nil;
-	list<person> people <- nil;
+
 	int current_merch <- 0; //Merch that I am selling right now, index of merchandising list
 	
 	init{
 		ask merch{
 			add self to: myself.merchandising;
-		}
-		ask person{
-			add self to: myself.people;
 		}
 	}
 	
@@ -101,24 +109,25 @@ species auctioneer skills:[fipa] {
 	 * If the price is reduced below the auctioneer minimum value the auction is cancelled
 	 */
 	 reflex send_broadcast when: (time =1) {
-		write "Sending broadcast to all people around";
+		write '(Time ' + time + '): ' + name + ' sends a cfp message to all participants';
+		
 	 	string merch_category <- (merchandising at current_merch).category;
+		do start_conversation with:[to :: people, protocol::'fipa-contract-net', performative :: 'cfp', contents:: [merch_category] ];
+	 }
+	 
+	 reflex read_propose_message when: !(empty(proposes)){
+	 	write '(Time ' + time + '): ' + name + ' receives propose messages';
 	 	
-	 	loop p over: people{ 
-	 		do start_conversation(to :: [p], protocol::'fipa-request', performative :: 'request', contents:: [merch_category] );
+	 	loop p over: proposes{
+	 		write 'I got it you '+ string(p.contents);
 	 	}
 	 }
 	 
-	 reflex read_agree_message when: !(empty(agrees)){
-	 	loop a over: agrees{
-	 		
-	 		write 'I got it you '+ string(a.contents);
-	 	}
-	 }
-	 
-	 reflex read_failure_message when: !(empty(failures)){
-	 	loop f over: failures{
-	 		write 'I got it you are '+ (string(f.contents));
+	 reflex read_refuse_message when: !(empty(refuses)){
+	 	write '(Time ' + time + '): ' + name + ' receives refuse messages';
+	 	
+	 	loop r over: refuses{
+	 		write 'I got it you are '+ (string(r.contents));
 	 	}
 	 }
 	 
