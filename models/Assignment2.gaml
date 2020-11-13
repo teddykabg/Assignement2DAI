@@ -70,7 +70,7 @@ species person skills:[moving,fipa] {
 		list<string> information <- request_from_auctioneer.contents;
 		
 		if(information contains 'Close'){
-			write '(Time ' + time + '): ' + name + ' receives a  (CLOSE) message from ' + agent(request_from_auctioneer.sender).name;
+			write '(Time ' + time + '): ' + name + ' receives a (CLOSE) message from ' + agent(request_from_auctioneer.sender).name;
 			
 			current_auction <- nil;
 			mycolor <- #green;
@@ -94,6 +94,7 @@ species person skills:[moving,fipa] {
 		else{
 			write '***** '+name+' buys for '+proposed_price;
 			do propose with: (message: request_from_auctioneer, contents:['BUY',proposed_price] ); 
+			mycolor <- #red;
 		}
 		
 	}
@@ -131,6 +132,7 @@ species auctioneer skills:[fipa] {
 	int replies_received <- 0;
 	int min_possible <- 0;
 	bool open <- false; //denotes that is not the first round, so if the product hasn't been bought I can decrese the price
+	bool no_items <- false;
 	
 
 	int current_merch <- 0; //Merch that I am selling right now, index of merchandising list
@@ -143,6 +145,9 @@ species auctioneer skills:[fipa] {
 	
 	bool end_auction{
 		open <- false;
+		proposes <- [];
+	 	refuses <- [];
+		informs <- [];
 		
 		do start_conversation with:[to :: current_partecipants, protocol::'no-protocol', performative :: 'inform', contents:: ['Close'] ];
 		
@@ -157,9 +162,8 @@ species auctioneer skills:[fipa] {
 	 		write 'I am starting a new auction I will let you know soon';
 	 	}else{
 	 		write 'Auction ENDED';
+	 		no_items <- true;
 	 		cfps <- [];
-	 		proposes <- [];
-	 		refuses <- [];
 	 	}
 	 	
 	 	replies_received <- replies_received+1;
@@ -181,57 +185,15 @@ species auctioneer skills:[fipa] {
 	aspect base {
 		draw rectangle(5,10) color: mycolor;
 	}
-	/*Dutch auction are Open cry and descending
-	 * Auctioneer starts at an artificially high price. 
-	 * Then continually lowers the offer price until an 
-	 * agent makes a bid which is equal to the current offer price.
-	 * The winner then pays his price.
-	 * When multiple auctions are auctioned the first winner takes his price and later winners pay less
-	 * Strategy: Get the bid a bit below true willingness to pay!
-	 * If the price is reduced below the auctioneer minimum value the auction is cancelled
-	 */
-	 reflex send_broadcast when: (time = start_time) { //time will become a variable, time in which i have sent the broadcast is important
+	
+	 reflex send_broadcast when: (time = start_time) and !no_items{ //time will become a variable, time in which i have sent the broadcast is important
 		write '*********************** NEW AUCTION********************************';
 		write '(Time ' + time + '): ' + name + ' sends a inform message to all participants';
 	 	string merch_category <- (merchandising at current_merch).category; //Telling everybody what am I selling
 		do start_conversation with:[to :: people, protocol::'no-protocol', performative :: 'inform', contents:: [merch_category] ];
 	 }
 	 
-	 reflex read_partecipants_message when: !(empty(proposes)) and !open{
-		replies_received <- 0;
-	 	loop p over: proposes{
-	 		write 'Adding partecipants';
-	 		add p.sender to:current_partecipants ;
-	 		write '(Time ' + time + '): ' + name + ' receives propose messages from '+ agent(p.sender).name+' with content '+p.contents;
-	 		replies_received <- replies_received +1;
-	 	}
-	 	
-	 	//Setting initial price etc..
-	 	do auction_setup;
-	 }
-	 
-	 reflex read_propose_message when: !(empty(proposes)) and open{
-	 	message message_ <- proposes at 0;
-	 	write '(Time ' + time + '): ' + name + ' receives propose messages from '+agent(message_.sender).name;
-	 	if(list(message_.contents) contains 'BUY'){
-	 		write 'Item sold for '+current_price+' $ to '+agent(message_.sender).name;
-	 		proposes <- [];
-	 		refuses <- [];
-			informs <- [];
-	 		do end_auction;
-	 	}
-	 	
-	 }
-	 
-	 reflex read_refuse_message when: !(empty(refuses)) and open{
-	 		write '(Time ' + time + '): ' + name + ' receives refuse messages from '+(refuses at 0).contents;
-	 		replies_received <- replies_received+1;
-	 	
-	 }
-	 
-
-	 
-	 reflex doing_auction when: length(current_partecipants) >=2 and (replies_received = length(current_partecipants))  {
+	 reflex doing_auction when: length(current_partecipants) >=2 and (replies_received = length(current_partecipants)) and !no_items  {
 	 	merch actual_merch <- merchandising at current_merch;
 	 	replies_received <- 0;
 	 	
@@ -249,9 +211,7 @@ species auctioneer skills:[fipa] {
 	 		else{
 	 			write 'Selling '+actual_merch.name+' for price '+current_price+ '$';
 	 			write 'Item not sold price too low now';
-	 			proposes <- [];
-	 			refuses <- [];
-				informs <- [];
+	 			
 	 			do end_auction;
 	 		}	
 	 	}
@@ -265,9 +225,38 @@ species auctioneer skills:[fipa] {
 	 									
 	 }
 	 
-
+	 reflex read_partecipants_message when: !(empty(proposes)) and !open and !no_items and time = start_time + 2.0{
+		replies_received <- 0;
+	 	loop p over: proposes{
+	 		write 'Adding partecipants';
+	 		add p.sender to:current_partecipants ;
+	 		write '(Time ' + time + '): ' + name + ' receives propose messages from '+ agent(p.sender).name+' with content '+p.contents;
+	 		replies_received <- replies_received +1;
+	 	}
+	 	
+	 	//Setting initial price etc..
+	 	write 'Setting up the auction!';
+	 	do auction_setup;
+	 }
 	 
+	 reflex read_propose_message when: !(empty(proposes)) and open and !no_items{
+	 	message message_ <- proposes at 0;
+	 	write '(Time ' + time + '): ' + name + ' receives propose messages from '+agent(message_.sender).name;
+	 	if(list(message_.contents) contains 'BUY'){
+	 		write 'Item sold for '+current_price+' $ to '+agent(message_.sender).name;
 
+	 		do end_auction;
+	 	}
+	 	
+	 }
+	 
+	 reflex read_refuse_message when: !(empty(refuses)) and open and !no_items{
+	 		write '(Time ' + time + '): ' + name + ' receives refuse messages from '+(refuses at 0).contents;
+	 		replies_received <- replies_received+1;
+	 	
+	 }
+	 
+	
 	 
 }
 
